@@ -7,7 +7,7 @@ import re
 # -------------------------------------------------------------------------
 
 # 1. Your Google Cloud API Key
-GOOGLE_API_KEY = "AIzaSyCjOHiNdwWmHdoNrLGXU6rYFWs0Tt6EKBE"
+GOOGLE_API_KEY = "AIzaSyBhjRBhEsXoBlEsMJaV5u7EJomG65djWnI"
 
 # 2. Your Search Engine ID (from programmablesearchengine.google.com)
 SEARCH_ENGINE_ID = "80a7463cfec4a4134"
