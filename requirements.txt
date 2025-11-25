@@ -1,4 +1,7 @@
 streamlit
 google-generativeai
+streamlit
+google-search-results
+pandas
 
 
