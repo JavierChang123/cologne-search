@@ -1,147 +1,150 @@
 import streamlit as st
-from serpapi import GoogleSearch
-import pandas as pd
+from googleapiclient.discovery import build
+import re
 
 # -------------------------------------------------------------------------
 # CONFIGURATION
 # -------------------------------------------------------------------------
 
-# Replace this with your actual API key from https://serpapi.com/
-# For testing without a key, you can leave it blank, but it won't fetch real data.
+# 1. Your Google Cloud API Key
+GOOGLE_API_KEY = "AIzaSyCjOHiNdwWmHdoNrLGXU6rYFWs0Tt6EKBE"
 
+# 2. Your Search Engine ID (from programmablesearchengine.google.com)
+SEARCH_ENGINE_ID = "80a7463cfec4a4134"
 
-# THE WHITELIST: Only results from these specific merchants will be shown.
-# This ensures users only buy from verified/legitimate sources.
+# Trusted Retailers
 TRUSTED_RETAILERS = [
-    "sephora",
-    "ulta",
-    "macy's",
-    "nordstrom",
-    "bloomingdale's",
-    "saks fifth avenue",
-    "fragrancenet",
-    "notino",
-    "dior",
-    "chanel",
-    "creed boutique",
-    "neiman marcus"
+    "sephora.com", "ulta.com", "macys.com", "nordstrom.com", 
+    "bloomingdales.com", "fragrancenet.com", "notino.com", 
+    "dior.com", "chanel.com", "creedboutique.com"
 ]
 
 # -------------------------------------------------------------------------
 # FUNCTIONS
 # -------------------------------------------------------------------------
 
-def is_trusted_source(merchant_name):
-    """Checks if the merchant is in our trusted list."""
-    if not merchant_name:
-        return False
+def extract_price(item):
+    """
+    Tries to find a price inside Google's rich snippet data (PageMap).
+    This is harder than SerpApi because the data is not always clean.
+    """
+    try:
+        # Check for 'offer' data in the pagemap (Schema.org)
+        pagemap = item.get('pagemap', {})
+        offer = pagemap.get('offer', [])
+        
+        if offer and isinstance(offer, list):
+            price = offer[0].get('price')
+            currency = offer[0].get('pricecurrency', '$')
+            if price:
+                return f"{price} {currency}", float(price)
+        
+        # Fallback: Check metatags
+        metatags = pagemap.get('metatags', [])
+        if metatags:
+            for tag in metatags:
+                if 'og:price:amount' in tag:
+                    return f"${tag['og:price:amount']}", float(tag['og:price:amount'])
+                
+    except Exception:
+        pass
     
-    merchant_lower = merchant_name.lower()
-    for trusted in TRUSTED_RETAILERS:
-        if trusted in merchant_lower:
-            return True
-    return False
+    return "Check Website", float('inf')
 
-def search_fragrance(query):
-    """
-    Searches Google Shopping for the fragrance and filters for trusted stores.
-    """
-    if API_KEY == "YOUR_SERPAPI_KEY_HERE":
-        st.error("Please insert a valid SerpApi Key in the code to fetch real data.")
+def search_google_custom(query):
+    if GOOGLE_API_KEY == "AIzaSyCjOHiNdwWmHdoNrLGXU6rYFWs0Tt6EKBE":
+        st.error("Please insert your valid Google Cloud API Key.")
         return []
 
-    params = {
-        "engine": "google_shopping",
-        "q": query,
-        "api_key": API_KEY,
-        "google_domain": "google.com",
-        "gl": "us", # Location: US
-        "hl": "en"  # Language: English
-    }
-
+    service = build("customsearch", "v1", developerKey=GOOGLE_API_KEY)
+    
+    # We restrict the search to our trusted sites using the 'site:' operator
+    # Creating a massive OR query: "Dior Sauvage (site:sephora.com OR site:ulta.com ...)"
+    sites_query = " OR ".join([f"site:{site}" for site in TRUSTED_RETAILERS])
+    full_query = f"{query} ({sites_query})"
+    
     try:
-        search = GoogleSearch(params)
-        results = search.get_dict()
+        # Execute search
+        res = service.cse().list(
+            q=full_query,
+            cx=SEARCH_ENGINE_ID,
+            num=10
+        ).execute()
         
-        shopping_results = results.get("shopping_results", [])
-        
-        # Filter and clean data
-        verified_options = []
-        
-        for item in shopping_results:
-            merchant = item.get("source") # The store name
+        items = res.get('items', [])
+        clean_results = []
+
+        for item in items:
+            title = item.get('title')
+            link = item.get('link')
+            snippet = item.get('snippet')
             
-            # THE CORE SECURITY LOGIC:
-            if is_trusted_source(merchant):
-                verified_options.append({
-                    "title": item.get("title"),
-                    "price_str": item.get("price"),
-                    "price_val": item.get("extracted_price"),
-                    "store": merchant,
-                    "link": item.get("link"),
-                    "image": item.get("thumbnail"),
-                    "rating": item.get("rating", "N/A"),
-                    "reviews": item.get("reviews", 0)
-                })
-        
+            # Get Image
+            pagemap = item.get('pagemap', {})
+            cse_image = pagemap.get('cse_image', [])
+            image_url = cse_image[0]['src'] if cse_image else None
+            
+            # Extract Price
+            price_str, price_val = extract_price(item)
+
+            # Determine Store Name from Link
+            store_name = "Unknown"
+            for retailer in TRUSTED_RETAILERS:
+                if retailer in link:
+                    store_name = retailer.replace(".com", "").capitalize()
+                    break
+
+            clean_results.append({
+                "title": title,
+                "price_str": price_str,
+                "price_val": price_val,
+                "store": store_name,
+                "link": link,
+                "image": image_url
+            })
+            
         # Sort by price (Low to High)
-        verified_options.sort(key=lambda x: x['price_val'] if x['price_val'] else float('inf'))
+        clean_results.sort(key=lambda x: x['price_val'])
         
-        return verified_options
+        return clean_results
 
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        st.error(f"Error: {e}")
         return []
 
 # -------------------------------------------------------------------------
-# STREAMLIT UI
+# UI
 # -------------------------------------------------------------------------
+st.set_page_config(page_title="LegitScents (Official API)", page_icon="🕵️")
+st.title("🕵️ LegitScents: Official Google API Version")
 
-st.set_page_config(page_title="LegitScents", page_icon="🧴")
+query = st.text_input("Enter fragrance name:", placeholder="e.g. Bleu de Chanel")
 
-st.title("🧴 LegitScents: Price Comparator")
-st.markdown("""
-Find the best prices for perfumes and colognes from **verified, legitimate retailers only**. 
-We filter out unauthorized sellers to ensure authenticity.
-""")
-
-# Input
-query = st.text_input("Enter the name of a cologne or perfume:", placeholder="e.g. Dior Sauvage Elixir")
-
-if st.button("Find Best Price"):
+if st.button("Search"):
     if not query:
-        st.warning("Please enter a fragrance name.")
+        st.warning("Please enter a name.")
     else:
-        with st.spinner(f"Searching verified retailers for '{query}'..."):
-            results = search_fragrance(query)
+        with st.spinner("Searching trusted retailers..."):
+            results = search_google_custom(query)
             
             if not results:
-                st.warning("No results found from trusted retailers. It might be out of stock or sold by unauthorized sellers.")
-            else:
-                st.success(f"Found {len(results)} verified options!")
-                
-                # Display results
-                for item in results:
-                    with st.container():
-                        col1, col2, col3 = st.columns([1, 2, 1])
+                st.warning("No results found. Try a different spelling.")
+            
+            for item in results:
+                with st.container():
+                    col1, col2 = st.columns([1, 3])
+                    with col1:
+                        if item['image']:
+                            st.image(item['image'], width=100)
+                    with col2:
+                        st.subheader(item['title'])
+                        st.caption(f"Store: **{item['store']}**")
                         
-                        with col1:
-                            if item['image']:
-                                st.image(item['image'], width=100)
-                        
-                        with col2:
-                            st.subheader(item['title'])
-                            st.caption(f"Sold by: **{item['store']}**")
-                            if item['rating'] != "N/A":
-                                st.write(f"⭐ {item['rating']} ({item['reviews']} reviews)")
-                        
-                        with col3:
-                            st.metric(label="Price", value=item['price_str'])
-                            st.link_button("Buy Now", item['link'])
-                        
-                        st.divider()
-
-# Sidebar Info
-st.sidebar.header("Trusted Sources")
-st.sidebar.write("We currently check the following retailers:")
-st.sidebar.write(", ".join([t.title() for t in TRUSTED_RETAILERS]))
+                        # Highlight price
+                        if item['price_val'] != float('inf'):
+                            st.metric("Estimated Price", item['price_str'])
+                        else:
+                            st.info("Price not listed in search snippet")
+                            
+                        st.markdown(f"[Visit Website]({item['link']})")
+                    st.divider()
