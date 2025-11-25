@@ -8,7 +8,7 @@ import pandas as pd
 
 # Replace this with your actual API key from https://serpapi.com/
 # For testing without a key, you can leave it blank, but it won't fetch real data.
-API_KEY = "YOUR_SERPAPI_KEY_HERE"
+
 
 # THE WHITELIST: Only results from these specific merchants will be shown.
 # This ensures users only buy from verified/legitimate sources.
